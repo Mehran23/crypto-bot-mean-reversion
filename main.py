@@ -1,37 +1,56 @@
 import sys
+import requests
+from concurrent.futures import ThreadPoolExecutor
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QHBoxLayout, QComboBox
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import ccxt
 import pandas as pd
 
 
 class TokenScanner:
-    """A class to manage token scanning functionality using CCXT."""
+    """A class to scan and filter tokens using the MEXC API."""
+    
+    API_BASE = "https://api.mexc.com/api/v3/ticker/24hr"
 
     def __init__(self):
-        self.exchange = ccxt.mexc()  # Initialize the exchange
+        self.symbols_data = []
 
-    def load_markets(self):
-        """Load all markets from the exchange."""
+    def fetch_symbols(self):
+        """Fetch all available symbols from MEXC."""
         try:
-            return self.exchange.load_markets()
+            response = requests.get(self.API_BASE)
+            if response.status_code == 200:
+                self.symbols_data = response.json()
+                print(f"Fetched {len(self.symbols_data)} symbols.")
+            else:
+                print(f"Failed to fetch symbols: {response.status_code}")
         except Exception as e:
-            print(f"Error loading markets: {e}")
-            return {}
+            print(f"Error fetching symbols: {e}")
 
-    def filter_usdt_markets(self, markets):
-        """Filter markets that end with USDT."""
-        return [
-            {"symbol": symbol, "base": market['base'], "quote": market['quote']}
-            for symbol, market in markets.items()
-            if market['quote'] == 'USDT'
+    def filter_symbols(self, min_volume=70000, keywords_to_exclude=None):
+        """Filter symbols based on volume and exclusion criteria."""
+        if keywords_to_exclude is None:
+            keywords_to_exclude = ['3S', '3L', '2L', '2S', '5L', '5S', 'UP', 'DOWN', 
+                                   'AUSD', 'USDJ', 'USDP', 'BUSD', 'OUSD', 'USDD', 'FDUSD', 'TUSD']
+        
+        filtered = [
+            symbol for symbol in self.symbols_data
+            if float(symbol.get("quoteVolume", 0)) >= min_volume
+            and 'USDT' in symbol.get("symbol", "")
+            and not any(keyword in symbol.get("symbol", "") for keyword in keywords_to_exclude)
         ]
+        return filtered
 
     def fetch_ohlcv(self, symbol, timeframe, limit=100):
-        """Fetch OHLCV data for a specific symbol and timeframe."""
+        """Fetch OHLCV data for a specific symbol."""
+        ohlcv_api = f"https://api.mexc.com/api/v3/klines?symbol={symbol}&interval={timeframe}&limit={limit}"
         try:
-            return self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            response = requests.get(ohlcv_api)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to fetch OHLCV for {symbol}: {response.status_code}")
+                return []
         except Exception as e:
             print(f"Error fetching OHLCV for {symbol}: {e}")
             return []
@@ -84,18 +103,17 @@ class App(QMainWindow):
 
     def start_token_scan(self):
         """Scan for tokens ending in USDT and display them."""
-        markets = self.scanner.load_markets()
-        usdt_markets = self.scanner.filter_usdt_markets(markets)
+        self.scanner.fetch_symbols()
+        filtered_symbols = self.scanner.filter_symbols()
 
         # Populate table with token data
-        self.token_table.setRowCount(len(usdt_markets))
-        self.token_table.setColumnCount(3)
-        self.token_table.setHorizontalHeaderLabels(["Symbol", "Base", "Quote"])
+        self.token_table.setRowCount(len(filtered_symbols))
+        self.token_table.setColumnCount(2)
+        self.token_table.setHorizontalHeaderLabels(["Symbol", "Volume"])
 
-        for i, token in enumerate(usdt_markets):
+        for i, token in enumerate(filtered_symbols):
             self.token_table.setItem(i, 0, QTableWidgetItem(token["symbol"]))
-            self.token_table.setItem(i, 1, QTableWidgetItem(token["base"]))
-            self.token_table.setItem(i, 2, QTableWidgetItem(token["quote"]))
+            self.token_table.setItem(i, 1, QTableWidgetItem(str(token["quoteVolume"])))
 
     def show_chart(self, row, column):
         """Show the chart for the selected token."""
@@ -106,18 +124,39 @@ class App(QMainWindow):
 
     def plot_candlestick_chart(self, symbol, timeframe):
         """Plot a candlestick chart for the given symbol and timeframe."""
-        ohlcv = self.scanner.fetch_ohlcv(symbol, timeframe)
+        ohlcv = self.scanner.fetch_ohlcv(symbol, timeframe)  # Geef het dynamische timeframe door
 
-        # Convert to DataFrame
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        if not ohlcv:
+            print(f"No data available for {symbol} at {timeframe}")
+            self.ax.clear()
+            self.ax.set_title(f"No data available for {symbol} ({timeframe})", fontsize=14)
+            self.canvas.draw()
+            return
+
+        
+        print(ohlcv[:5])  # Debug: Inspect the structure of the fetched data
+
+        # Use all 8 columns of the OHLCV data
+        df = pd.DataFrame(
+            ohlcv,
+            columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume']
+        )
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
 
         # Clear previous plot
         self.ax.clear()
 
         # Plot candlestick-like chart (high-low range with close price)
-        self.ax.plot(df['timestamp'], df['close'], label='Close Price', color='blue')
-        self.ax.fill_between(df['timestamp'], df['low'], df['high'], color='lightgray', alpha=0.3, label='High-Low Range')
+        self.ax.plot(df['timestamp'], df['close'].astype(float), label='Close Price', color='blue')
+        self.ax.fill_between(
+            df['timestamp'],
+            df['low'].astype(float),
+            df['high'].astype(float),
+            color='lightgray',
+            alpha=0.3,
+            label='High-Low Range'
+        )
 
         # Set titles and labels
         self.ax.set_title(f'{symbol} Candlestick Chart ({timeframe})', fontsize=14)
@@ -132,7 +171,6 @@ class App(QMainWindow):
 
         # Render the canvas
         self.canvas.draw()
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
