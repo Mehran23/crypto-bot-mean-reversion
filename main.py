@@ -31,7 +31,7 @@ class TokenScanner:
         """Filter symbols based on volume and exclusion criteria."""
         if keywords_to_exclude is None:
             keywords_to_exclude = ['3S', '3L', '2L', '2S', '5L', '5S', 'UP', 'DOWN', 
-                                   'AUSD', 'USDJ', 'USDP', 'BUSD', 'OUSD', 'USDD', 'FDUSD', 'TUSD']
+                                'AUSD', 'USDJ', 'USDP', 'BUSD', 'OUSD', 'USDD', 'FDUSD', 'TUSD']
         
         filtered = [
             symbol for symbol in self.symbols_data
@@ -106,14 +106,24 @@ class App(QMainWindow):
         self.scanner.fetch_symbols()
         filtered_symbols = self.scanner.filter_symbols()
 
-        # Populate table with token data
+        # Update table columns for additional data
         self.token_table.setRowCount(len(filtered_symbols))
-        self.token_table.setColumnCount(2)
-        self.token_table.setHorizontalHeaderLabels(["Symbol", "Volume"])
+        self.token_table.setColumnCount(5)  # Symbol, Base, Quote, Price, Volume
+        self.token_table.setHorizontalHeaderLabels(["Symbol", "Base", "Quote", "Price", "Volume"])
 
         for i, token in enumerate(filtered_symbols):
-            self.token_table.setItem(i, 0, QTableWidgetItem(token["symbol"]))
-            self.token_table.setItem(i, 1, QTableWidgetItem(str(token["quoteVolume"])))
+            # Extract Base and Quote from the symbol
+            symbol = token["symbol"]
+            base, quote = symbol[:-4], symbol[-4:]  # Split symbol into base and quote
+            price = token.get("lastPrice", "N/A")  # Get the last price, default to "N/A"
+            volume = token.get("quoteVolume", "N/A")  # Get the volume, default to "N/A"
+
+            # Populate the table
+            self.token_table.setItem(i, 0, QTableWidgetItem(symbol))
+            self.token_table.setItem(i, 1, QTableWidgetItem(base))
+            self.token_table.setItem(i, 2, QTableWidgetItem(quote))
+            self.token_table.setItem(i, 3, QTableWidgetItem(str(price)))
+            self.token_table.setItem(i, 4, QTableWidgetItem(str(volume)))
 
     def show_chart(self, row, column):
         """Show the chart for the selected token."""
