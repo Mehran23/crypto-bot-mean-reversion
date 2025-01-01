@@ -6,10 +6,44 @@ import ccxt
 import pandas as pd
 
 
+class TokenScanner:
+    """A class to manage token scanning functionality using CCXT."""
+
+    def __init__(self):
+        self.exchange = ccxt.mexc()  # Initialize the exchange
+
+    def load_markets(self):
+        """Load all markets from the exchange."""
+        try:
+            return self.exchange.load_markets()
+        except Exception as e:
+            print(f"Error loading markets: {e}")
+            return {}
+
+    def filter_usdt_markets(self, markets):
+        """Filter markets that end with USDT."""
+        return [
+            {"symbol": symbol, "base": market['base'], "quote": market['quote']}
+            for symbol, market in markets.items()
+            if market['quote'] == 'USDT'
+        ]
+
+    def fetch_ohlcv(self, symbol, timeframe, limit=100):
+        """Fetch OHLCV data for a specific symbol and timeframe."""
+        try:
+            return self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        except Exception as e:
+            print(f"Error fetching OHLCV for {symbol}: {e}")
+            return []
+
+
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("USDT Token Scanner")
+
+        # Initialize TokenScanner
+        self.scanner = TokenScanner()
 
         # Main widget
         self.central_widget = QWidget()
@@ -50,15 +84,8 @@ class App(QMainWindow):
 
     def start_token_scan(self):
         """Scan for tokens ending in USDT and display them."""
-        exchange = ccxt.mexc()  # Use MEXC as the exchange
-        markets = exchange.load_markets()  # Load all available markets
-
-        # Filter tokens ending with USDT
-        usdt_markets = [
-            {"symbol": symbol, "base": market['base'], "quote": market['quote']}
-            for symbol, market in markets.items()
-            if market['quote'] == 'USDT'
-        ]
+        markets = self.scanner.load_markets()
+        usdt_markets = self.scanner.filter_usdt_markets(markets)
 
         # Populate table with token data
         self.token_table.setRowCount(len(usdt_markets))
@@ -79,11 +106,7 @@ class App(QMainWindow):
 
     def plot_candlestick_chart(self, symbol, timeframe):
         """Plot a candlestick chart for the given symbol and timeframe."""
-        exchange = ccxt.mexc()
-        limit = 100  # Fetch the last 100 candles
-
-        # Fetch OHLCV data
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        ohlcv = self.scanner.fetch_ohlcv(symbol, timeframe)
 
         # Convert to DataFrame
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -103,7 +126,7 @@ class App(QMainWindow):
         self.ax.legend(fontsize=10)
 
         # Improve readability of x-axis labels
-        self.ax.tick_params(axis='x', labelrotation=45, labelsize=10)  # Rotate timestamps
+        self.ax.tick_params(axis='x', labelrotation=45, labelsize=10)
         self.ax.tick_params(axis='y', labelsize=10)
         self.canvas.figure.tight_layout()  # Adjust layout to prevent overlap
 
