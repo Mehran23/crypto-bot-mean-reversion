@@ -81,7 +81,7 @@ class App(QMainWindow):
 
         # Dropdown for timeframe selection
         self.timeframe_selector = QComboBox()
-        self.timeframe_selector.addItems(["1m", "5m", "15m", "1h", "4h", "1d"])  # Timeframe options
+        self.timeframe_selector.addItems(["1m", "5m", "15m", "60m", "4h", "1d"])  # Timeframe options
         self.left_layout.addWidget(self.timeframe_selector)
 
         # Table to display token data
